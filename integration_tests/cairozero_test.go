@@ -82,6 +82,12 @@ func TestCairoZeroFiles(t *testing.T) {
 			continue
 		}
 
+		ruTraceFile, ruMemoryFile, _, err := runRustVm(compiledOutput)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+
 		traceFile, memoryFile, _, err := runVm(compiledOutput)
 		if err != nil {
 			t.Error(err)
@@ -89,6 +95,12 @@ func TestCairoZeroFiles(t *testing.T) {
 		}
 
 		pyTrace, pyMemory, err := decodeProof(pyTraceFile, pyMemoryFile)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+
+		ruTrace, ruMemory, err := decodeProof(ruTraceFile, ruMemoryFile)
 		if err != nil {
 			t.Error(err)
 			continue
@@ -105,6 +117,14 @@ func TestCairoZeroFiles(t *testing.T) {
 			t.Logf("trace:\n%s\n", traceRepr(trace))
 		}
 		if !assert.Equal(t, pyMemory, memory) {
+			t.Logf("pymemory;\n%s\n", memoryRepr(pyMemory))
+			t.Logf("memory;\n%s\n", memoryRepr(memory))
+		}
+		if !assert.Equal(t, ruTrace, trace) {
+			t.Logf("pytrace:\n%s\n", traceRepr(pyTrace))
+			t.Logf("trace:\n%s\n", traceRepr(trace))
+		}
+		if !assert.Equal(t, ruMemory, memory) {
 			t.Logf("pymemory;\n%s\n", memoryRepr(pyMemory))
 			t.Logf("memory;\n%s\n", memoryRepr(memory))
 		}
@@ -183,6 +203,45 @@ func runPythonVm(testFilename, path string) (string, string, error) {
 	}
 
 	return traceOutput, memoryOutput, nil
+}
+
+// given a path to a compiled cairo zero file, execute
+// it using the rust vm from lambdaclass currently in production
+func runRustVm(path string) (string, string, string, error) {
+	traceOutput := swapExtenstion(path, traceSuffix)
+	memoryOutput := swapExtenstion(path, memorySuffix)
+
+	// If any other layouts are needed, add the suffix checks here.
+	// The convention would be: ".$layout.cairo"
+	// A file without this suffix will use the default ("plain") layout, which is a layout with no builtins included"
+	layout := "plain"
+	if strings.Contains(path, ".small") {
+		layout = "small"
+	} else if strings.Contains(path, ".starknet_with_keccak") {
+		layout = "starknet_with_keccak"
+	}
+
+	cmd := exec.Command(
+		"../../cairo-vm-rust-lambdaclass/target/release/cairo-vm-cli",
+		"--proof_mode",
+		"--trace_file",
+		traceOutput,
+		"--memory_file",
+		memoryOutput,
+		"--layout",
+		layout,
+		path,
+	)
+
+	res, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", string(res), fmt.Errorf(
+			"cairo-vm run %s: %w\n%s", path, err, string(res),
+		)
+	}
+
+	return traceOutput, memoryOutput, string(res), nil
+
 }
 
 // given a path to a compiled cairo zero file, execute
